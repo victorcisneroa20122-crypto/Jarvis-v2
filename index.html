@@ -1,0 +1,596 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Orión</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#050b14">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500&family=Rajdhani:wght@500;600;700&display=swap">
+<style>
+/* Layout: one-screen HUD. Orb on top, transcript in the middle, input dock at the bottom. Single dark look by choice. */
+:root {
+  --bg: #050b14;
+  --panel: #0a1626;
+  --line: #17304a;
+  --fg: #d7ecf7;
+  --muted: #86a3b8;
+  --cyan: #4fd8ff;
+  --cyan-dim: #1b6f8c;
+  --gold: #f2b457;
+  --danger: #ff8d7e;
+  --font-display: "Rajdhani", "Segoe UI", system-ui, sans-serif;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  color-scheme: dark;
+}
+html, body { height: 100%; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font: 400 16px/1.5 var(--font-body);
+  padding-block: 10px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 720px;
+  margin-inline: auto;
+}
+.top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.brand { font: 700 22px/1 var(--font-display); letter-spacing: 0.32em; text-transform: uppercase; color: var(--fg); }
+.status { font: 500 12px/1 var(--font-mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--cyan); display: flex; align-items: center; gap: 8px; }
+.status i { width: 8px; height: 8px; border-radius: 50%; background: var(--cyan); display: inline-block; }
+body[data-state="listening"] .status { color: var(--gold); }
+body[data-state="listening"] .status i { background: var(--gold); }
+body[data-state="thinking"] .status i { animation: blink 0.8s steps(2) infinite; }
+@keyframes blink { 50% { opacity: 0.2; } }
+
+.stage { display: flex; justify-content: center; }
+.orb { width: min(50vw, 220px); aspect-ratio: 1; max-width: 100%; border: 0; background: none; padding: 0; cursor: pointer; border-radius: 50%; }
+.orb canvas { width: 100%; height: 100%; display: block; }
+.orb:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
+
+.log { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; padding: 4px 2px 8px; scroll-behavior: smooth; }
+.msg { min-width: 0; max-width: 92%; }
+.msg .who { font: 500 11px/1 var(--font-mono); letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
+.msg .txt { white-space: pre-wrap; overflow-wrap: anywhere; }
+.msg.user { align-self: flex-end; text-align: right; }
+.msg.user .who { color: var(--gold); }
+.msg.bot .who { color: var(--cyan); }
+.msg.bot .txt { color: var(--fg); }
+.msg.user .txt { color: #f0e3cc; }
+.msg.pending .txt { color: var(--muted); }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { font: 500 13px/1 var(--font-body); color: var(--cyan); background: transparent; border: 1px solid var(--cyan-dim); border-radius: 999px; padding: 9px 14px; cursor: pointer; }
+.chip:hover { background: rgba(79, 216, 255, 0.08); }
+a.chip { text-decoration: none; display: inline-block; }
+a.hint2, .hint2 { font: 400 13px/1.3 var(--font-body); color: var(--muted); overflow-wrap: anywhere; }
+a.hint { font: 400 13px/1.3 var(--font-body); color: var(--cyan); }
+.msg .links { margin-top: 8px; }
+
+.note { font: 400 13px/1.4 var(--font-body); color: var(--danger); min-height: 0; }
+.note:empty { display: none; }
+
+.dock { display: flex; align-items: center; gap: 8px; }
+.dock input[type="text"] { flex: 1; min-width: 0; background: var(--panel); border: 1px solid var(--line); color: var(--fg); font: 400 16px/1 var(--font-body); padding: 14px 16px; border-radius: 28px; }
+.dock input[type="text"]::placeholder { color: var(--muted); }
+.mic, .send { flex: none; width: 52px; height: 52px; border-radius: 50%; display: grid; place-items: center; cursor: pointer; border: 1px solid var(--cyan-dim); background: var(--panel); color: var(--cyan); }
+.send { border-color: var(--line); color: var(--muted); }
+.send:not(:disabled):hover, .mic:hover { border-color: var(--cyan); }
+.send:disabled { opacity: 0.4; cursor: default; }
+.mic[aria-pressed="true"] { background: var(--gold); border-color: var(--gold); color: #1a1204; animation: ring 1.4s ease-out infinite; }
+@keyframes ring { 0% { box-shadow: 0 0 0 0 rgba(242, 180, 87, 0.5); } 100% { box-shadow: 0 0 0 16px rgba(242, 180, 87, 0); } }
+svg.ic { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+
+details.cfg { border-top: 1px solid var(--line); padding-top: 8px; }
+details.cfg summary { font: 500 12px/1 var(--font-mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); cursor: pointer; padding: 6px 0; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px 16px; padding: 10px 0 4px; }
+.field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.field label { font: 500 12px/1 var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.field select, .field input[type="text"] { background: var(--panel); color: var(--fg); border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px; font: 400 15px/1.2 var(--font-body); min-width: 0; width: 100%; }
+.field input[type="range"] { accent-color: var(--cyan); width: 100%; }
+.row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.btn { font: 600 14px/1 var(--font-display); letter-spacing: 0.08em; text-transform: uppercase; color: var(--cyan); background: transparent; border: 1px solid var(--cyan-dim); border-radius: 8px; padding: 10px 14px; cursor: pointer; }
+.btn:hover { border-color: var(--cyan); }
+@media (prefers-reduced-motion: reduce) {
+  .log { scroll-behavior: auto; }
+  .mic[aria-pressed="true"], body[data-state="thinking"] .status i { animation: none; }
+}
+*, *::before, *::after { box-sizing: border-box; }
+body { margin: 0; }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+
+<header class="top">
+    <div class="brand" id="brand">Orión</div>
+    <div class="status" role="status" aria-live="polite"><i></i><span id="statusText">En espera</span></div>
+  </header>
+
+  <div class="stage">
+    <button class="orb" id="orb" type="button" aria-label="Despertar o interrumpir a Orión"><canvas id="cv"></canvas></button>
+  </div>
+
+  <main class="log" id="log" aria-live="polite"></main>
+
+  <div class="note" id="note" role="alert"></div>
+
+  <form class="dock" id="form" autocomplete="off">
+    <button class="mic" id="mic" type="button" aria-pressed="false" aria-label="Hablar con el micrófono">
+      <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+    </button>
+    <input type="text" id="input" placeholder="Escribe o toca el micrófono" aria-label="Mensaje">
+    <button class="send" id="send" type="submit" aria-label="Enviar" disabled>
+      <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h15M13 6l6 6-6 6"/></svg>
+    </button>
+  </form>
+
+  <details class="cfg">
+    <summary>Ajustes de voz y trato</summary>
+    <div class="grid">
+      <div class="field"><label for="voice">Voz</label><select id="voice"></select></div>
+      <div class="field"><label for="rate">Velocidad <span id="rateV"></span></label><input type="range" id="rate" min="0.6" max="1.4" step="0.05"></div>
+      <div class="field"><label for="pitch">Tono <span id="pitchV"></span></label><input type="range" id="pitch" min="0.5" max="1.3" step="0.05"></div>
+      <div class="field"><label for="engine">Cerebro</label><select id="engine"><option value="local">En el teléfono (sin internet)</option><option value="gemini">Gemini (con internet)</option></select></div>
+      <div class="field"><label for="lmodel">Modelo local</label><select id="lmodel"><option value="">Cargando modelos…</option></select><button class="btn" type="button" id="dlbtn">Descargar modelo</button><span class="hint2" id="dl" role="status"></span></div>
+      <div class="field"><label for="key">Clave de Gemini</label><input type="password" id="key" autocomplete="off" spellcheck="false" placeholder="Pega tu clave aquí"><a class="hint" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">Obtener una clave gratis</a></div>
+      <div class="field"><label for="model">Modelo de Gemini</label><input type="text" id="model" spellcheck="false"></div>
+      <div class="field"><label for="name">Nombre del asistente</label><input type="text" id="name" maxlength="20"></div>
+      <div class="field"><label for="addr">Cómo te llama</label><input type="text" id="addr" maxlength="20"></div>
+      <div class="field"><label for="auto">Respuesta hablada</label>
+        <div class="row"><input type="checkbox" id="auto"><span>Leer en voz alta</span><button class="btn" type="button" id="test">Probar voz</button></div>
+      </div>
+    </div>
+  </details>
+
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var log = $('log'), input = $('input'), sendBtn = $('send'), micBtn = $('mic'), note = $('note');
+  var synth = window.speechSynthesis;
+  var reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* ---------- settings ---------- */
+  var cfg = { engine: (navigator.gpu ? 'local' : 'gemini'), localModel: '', apiKey: '', model: 'gemini-2.5-flash', voiceURI: '', rate: 0.95, pitch: 0.8, auto: true, name: 'Orión', addr: 'señor' };
+  try { var s = JSON.parse(localStorage.getItem('orion-cfg') || '{}'); for (var k in s) if (k in cfg) cfg[k] = s[k]; } catch (e) {}
+  function saveCfg() { try { localStorage.setItem('orion-cfg', JSON.stringify(cfg)); } catch (e) {} }
+
+  /* ---------- state ---------- */
+  var STATUS = { idle: 'En espera', listening: 'Escuchando', thinking: 'Procesando', speaking: 'Hablando' };
+  var state = 'idle', awake = false, history = [], abortCtl = null, rec = null, listening = false, micFailed = false;
+  function setState(st) {
+    state = st;
+    document.body.setAttribute('data-state', st);
+    $('statusText').textContent = STATUS[st];
+    micBtn.setAttribute('aria-pressed', st === 'listening' ? 'true' : 'false');
+    if (reduce) drawOrb(0);
+  }
+  function setNote(t) { note.textContent = t || ''; }
+
+  /* ---------- transcript ---------- */
+  function addMsg(role, text, pending) {
+    var d = document.createElement('div');
+    d.className = 'msg ' + role + (pending ? ' pending' : '');
+    var w = document.createElement('div'); w.className = 'who'; w.textContent = role === 'user' ? 'Tú' : cfg.name;
+    var t = document.createElement('div'); t.className = 'txt'; t.textContent = text;
+    d.appendChild(w); d.appendChild(t); log.appendChild(d);
+    log.scrollTop = log.scrollHeight;
+    return d;
+  }
+  function clean(t) {
+    return String(t || '').replace(/```[\s\S]*?```/g, ' ').replace(/[*_#`>~]/g, '').replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').replace(/\s+\n/g, '\n').trim();
+  }
+
+  /* ---------- voices ---------- */
+  var voices = [];
+  var MALE = /jorge|diego|pablo|juan|carlos|enrique|miguel|andr[eé]s|male|google espa/i;
+  function loadVoices() {
+    if (!synth) return;
+    voices = synth.getVoices().filter(function (v) { return /^es/i.test(v.lang); });
+    var sel = $('voice'); sel.innerHTML = '';
+    if (!voices.length) { var o = document.createElement('option'); o.textContent = 'Voz predeterminada del dispositivo'; sel.appendChild(o); return; }
+    voices.sort(function (a, b) { return (MALE.test(b.name) ? 1 : 0) - (MALE.test(a.name) ? 1 : 0); });
+    voices.forEach(function (v) {
+      var o = document.createElement('option'); o.value = v.voiceURI; o.textContent = v.name + ' (' + v.lang + ')'; sel.appendChild(o);
+    });
+    var has = voices.some(function (v) { return v.voiceURI === cfg.voiceURI; });
+    if (!has) cfg.voiceURI = voices[0].voiceURI;
+    sel.value = cfg.voiceURI;
+  }
+  if (synth) { loadVoices(); synth.onvoiceschanged = loadVoices; }
+
+  function speak(text) {
+    if (!synth || !cfg.auto) { setState('idle'); return; }
+    synth.cancel();
+    var parts = (text.match(/[^.!?…\n]+[.!?…]*\s*/g) || [text]).map(function (p) { return p.trim(); }).filter(Boolean);
+    if (!parts.length) { setState('idle'); return; }
+    var voice = voices.filter(function (v) { return v.voiceURI === cfg.voiceURI; })[0];
+    parts.forEach(function (p, i) {
+      var u = new SpeechSynthesisUtterance(p);
+      u.lang = voice ? voice.lang : 'es-MX';
+      if (voice) u.voice = voice;
+      u.rate = cfg.rate; u.pitch = cfg.pitch;
+      if (i === 0) u.onstart = function () { setState('speaking'); };
+      if (i === parts.length - 1) { u.onend = function () { setState('idle'); }; u.onerror = function () { setState('idle'); }; }
+      synth.speak(u);
+    });
+  }
+
+  /* ---------- AI (Gemini, direct from the browser) and app links ---------- */
+  var pendingLinks = [];
+  function enc(s) { return encodeURIComponent(s || ''); }
+  var APPS = {
+    whatsapp: function (q) { return q ? 'https://wa.me/?text=' + enc(q) : 'https://wa.me/'; },
+    youtube: function (q) { return q ? 'https://www.youtube.com/results?search_query=' + enc(q) : 'https://www.youtube.com/'; },
+    maps: function (q) { return q ? 'https://www.google.com/maps/search/?api=1&query=' + enc(q) : 'https://maps.google.com/'; },
+    gmail: function () { return 'https://mail.google.com/'; },
+    calendario: function () { return 'https://calendar.google.com/'; },
+    drive: function () { return 'https://drive.google.com/'; },
+    fotos: function () { return 'https://photos.google.com/'; },
+    google: function (q) { return q ? 'https://www.google.com/search?q=' + enc(q) : 'https://www.google.com/'; },
+    traductor: function (q) { return 'https://translate.google.com/?sl=auto&tl=es&text=' + enc(q); },
+    spotify: function (q) { return q ? 'https://open.spotify.com/search/' + enc(q) : 'https://open.spotify.com/'; },
+    telegram: function () { return 'https://web.telegram.org/'; },
+    instagram: function () { return 'https://www.instagram.com/'; },
+    facebook: function () { return 'https://www.facebook.com/'; },
+    x: function () { return 'https://x.com/'; },
+    tiktok: function () { return 'https://www.tiktok.com/'; },
+    netflix: function () { return 'https://www.netflix.com/'; }
+  };
+  var ALIAS = { calendar: 'calendario', googlecalendar: 'calendario', googlemaps: 'maps', mapas: 'maps', twitter: 'x', translate: 'traductor', googletraductor: 'traductor', photos: 'fotos', googlefotos: 'fotos', googledrive: 'drive', buscar: 'google' };
+  function norm(s) { return String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]/g, ''); }
+  function extractCommands(text) {
+    var cmds = [];
+    var out = String(text || '').replace(/\[\[ABRIR:([^|\]]*)\|?([^\]]*)\]\]/g, function (_, a, q) { cmds.push({ app: a.trim(), q: q.trim() }); return ''; });
+    return { text: out.trim(), cmds: cmds };
+  }
+  function queueCommands(cmds) {
+    cmds.forEach(function (c) {
+      var key = norm(c.app); key = ALIAS[key] || key;
+      var f = APPS[key];
+      if (f) pendingLinks.push({ label: 'Abrir ' + c.app + (c.q ? ': ' + c.q : ''), url: f(c.q) });
+    });
+  }
+  function renderLinks(el) {
+    if (!pendingLinks.length) return;
+    var box = document.createElement('div'); box.className = 'chips links';
+    pendingLinks.forEach(function (l) {
+      var a = document.createElement('a'); a.className = 'chip'; a.href = l.url; a.target = '_blank'; a.rel = 'noopener noreferrer'; a.textContent = l.label; box.appendChild(a);
+    });
+    pendingLinks = [];
+    el.appendChild(box); log.scrollTop = log.scrollHeight;
+  }
+  function setDl(t) { var d = $('dl'); if (d) d.textContent = t || ''; }
+  function systemText() {
+    var now = new Date().toLocaleString('es-MX', { dateStyle: 'full', timeStyle: 'short' });
+    return 'Eres ' + cfg.name + ', un compañero de IA con el porte de un mayordomo digital británico: sereno, culto, leal, con humor seco y muy poco dramatismo. ' +
+      'Te diriges al usuario como "' + cfg.addr + '". Respondes siempre en español. Tus respuestas se leen en voz alta, así que usa frases cortas y naturales, ' +
+      'máximo tres frases salvo que te pidan más, sin listas, sin markdown, sin emojis y sin símbolos raros. ' +
+      'Si no sabes algo, dilo con elegancia. Fecha y hora del usuario: ' + now + '. ' +
+      'No puedes leer correos ni controlar el teléfono; si te piden abrir una app, el sistema ya muestra un botón y tú solo lo confirmas en una frase.';
+  }
+  function buildPrompt() {
+    var tr = history.slice(-12).map(function (m) { return (m.r === 'user' ? 'Usuario: ' : cfg.name + ': ') + m.t; }).join('\n');
+    return systemText() + '\n\nConversación hasta ahora:\n' + tr + '\n\nResponde ahora como ' + cfg.name + ' al último mensaje del usuario.';
+  }
+  function detectOpen(t) {
+    var n = String(t || '').toLowerCase();
+    var m = n.match(/\b(?:busca|buscar|pon|reproduce)\s+(.+?)\s+en\s+([a-záéíóúñ ]+?)\s*[.!?]*$/);
+    if (m) { var k = norm(m[2]); k = ALIAS[k] || k; if (APPS[k]) return { app: m[2].trim(), q: m[1].trim() }; }
+    var m2 = n.match(/\b(?:abre|abrir|ábreme|abreme|ve a|ir a|entra a|abrime)\s+(?:la\s+app\s+de\s+|la\s+aplicación\s+de\s+|el\s+|la\s+)?([a-záéíóúñ0-9 ]+?)\s*[.!?]*$/);
+    if (m2) { var k2 = norm(m2[1]); k2 = ALIAS[k2] || k2; if (APPS[k2]) return { app: m2[1].trim(), q: '' }; }
+    return null;
+  }
+
+  /* ----- Gemini (needs internet and a key) ----- */
+  async function callGemini(prompt, signal) {
+    var url = 'https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(cfg.model) + ':generateContent';
+    var res = await fetch(url, {
+      method: 'POST', signal: signal,
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': cfg.apiKey },
+      body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: prompt }] }] })
+    });
+    var data = await res.json().catch(function () { return {}; });
+    if (!res.ok) { var err = new Error((data.error && data.error.message) || ('HTTP ' + res.status)); err.status = res.status; throw err; }
+    var c = data.candidates && data.candidates[0];
+    var parts = c && c.content && c.content.parts;
+    return (parts || []).map(function (p) { return p.text || ''; }).join('');
+  }
+
+  /* ----- Local model (WebLLM, runs on the device, no internet after the first download) ----- */
+  var webllm = null, engine = null, engineModel = '', engineBusy = null;
+  async function loadWebLLM() {
+    if (webllm) return webllm;
+    var urls = ['https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm@0.2.79/+esm', 'https://esm.run/@mlc-ai/web-llm'];
+    for (var i = 0; i < urls.length; i++) {
+      try { webllm = await import(urls[i]); return webllm; } catch (e) { /* try the next source */ }
+    }
+    var err = new Error('lib'); err.code = 'lib'; throw err;
+  }
+  async function fillModels() {
+    var sel = $('lmodel');
+    try {
+      var w = await loadWebLLM();
+      var list = ((w.prebuiltAppConfig && w.prebuiltAppConfig.model_list) || []).filter(function (m) {
+        return /instruct|-it-|-it$|chat/i.test(m.model_id) && !/vision|embed|coder|math|r1|distill/i.test(m.model_id) && (!m.vram_required_MB || m.vram_required_MB <= 3000);
+      }).sort(function (a, b) { return (a.vram_required_MB || 0) - (b.vram_required_MB || 0); });
+      if (!list.length) throw new Error('empty');
+      sel.innerHTML = '';
+      list.forEach(function (m) {
+        var o = document.createElement('option'); o.value = m.model_id;
+        o.textContent = m.model_id.replace(/-MLC$/, '') + (m.vram_required_MB ? ' (~' + Math.round(m.vram_required_MB) + ' MB)' : '');
+        sel.appendChild(o);
+      });
+      var ids = list.map(function (m) { return m.model_id; });
+      var pick = ids.indexOf(cfg.localModel) >= 0 ? cfg.localModel : '';
+      var prefs = [/Qwen2\.5-1\.5B-Instruct-q4f16/, /Llama-3\.2-1B-Instruct-q4f16/, /Qwen2\.5-0\.5B-Instruct-q4f16/];
+      for (var i = 0; i < prefs.length && !pick; i++) {
+        for (var j = 0; j < ids.length; j++) { if (prefs[i].test(ids[j])) { pick = ids[j]; break; } }
+      }
+      cfg.localModel = pick || ids[0]; sel.value = cfg.localModel; saveCfg();
+    } catch (e) {
+      sel.innerHTML = '<option value="">Conéctate una vez para ver los modelos</option>';
+    }
+  }
+  async function ensureEngine(onProgress) {
+    if (engine && engineModel === cfg.localModel) return engine;
+    if (!navigator.gpu) { var e1 = new Error('nogpu'); e1.code = 'nogpu'; throw e1; }
+    if (!cfg.localModel) await fillModels();
+    if (!cfg.localModel) { var e2 = new Error('nomodel'); e2.code = 'nomodel'; throw e2; }
+    if (engineBusy) return engineBusy;
+    var w = await loadWebLLM();
+    engineBusy = w.CreateMLCEngine(cfg.localModel, {
+      initProgressCallback: function (p) {
+        var t = Math.round((p.progress || 0) * 100) + '% ' + (p.text || '');
+        setDl(t); if (onProgress) onProgress(t);
+      }
+    }).then(function (e) { engine = e; engineModel = cfg.localModel; setDl('Modelo listo. Funciona sin internet.'); return e; })
+      .finally(function () { engineBusy = null; });
+    return engineBusy;
+  }
+  async function callLocal(onText, signal, onProgress) {
+    var eng = await ensureEngine(onProgress);
+    var msgs = [{ role: 'system', content: systemText() }].concat(history.slice(-10).map(function (m) {
+      return { role: m.r === 'user' ? 'user' : 'assistant', content: m.t };
+    }));
+    var stream = await eng.chat.completions.create({ messages: msgs, stream: true, temperature: 0.7, max_tokens: 280 });
+    var acc = '';
+    for await (var ch of stream) {
+      if (signal.aborted) { try { eng.interruptGenerate(); } catch (e) { /* ignore */ } break; }
+      var d = ch.choices && ch.choices[0] && ch.choices[0].delta && ch.choices[0].delta.content;
+      if (d) { acc += d; onText(acc); }
+    }
+    return acc;
+  }
+
+  async function ask(text) {
+    if (abortCtl) abortCtl.abort();
+    if (synth) synth.cancel();
+    setNote('');
+    addMsg('user', text);
+    history.push({ r: 'user', t: text });
+
+    var cmd = detectOpen(text);
+    if (cmd) {
+      queueCommands([{ app: cmd.app, q: cmd.q }]);
+      var okTxt = 'Como ordene, ' + cfg.addr + '. Toque el botón para abrirlo.';
+      var el0 = addMsg('bot', okTxt); history.push({ r: 'bot', t: okTxt });
+      renderLinks(el0); speak(okTxt); return;
+    }
+
+    var useLocal = cfg.engine === 'local';
+    if (!useLocal && !cfg.apiKey) {
+      addMsg('bot', 'Necesito su clave de Gemini para pensar. Péguela en Ajustes de voz y trato, o cambie el cerebro a "En el teléfono".');
+      document.querySelector('details.cfg').open = true;
+      setState('idle'); return;
+    }
+    var el = addMsg('bot', '…', true);
+    var tx = el.querySelector('.txt');
+    setState('thinking');
+    abortCtl = new AbortController();
+    try {
+      var raw;
+      if (useLocal) {
+        raw = await callLocal(function (t) {
+          var c = clean(t);
+          if (c) { el.classList.remove('pending'); tx.textContent = c; log.scrollTop = log.scrollHeight; }
+        }, abortCtl.signal, function (p) { if (el.classList.contains('pending')) tx.textContent = 'Preparando mi cerebro local… ' + p; });
+      } else {
+        raw = await callGemini(buildPrompt(), abortCtl.signal);
+      }
+      var out = clean(raw) || 'Disculpe, no tengo nada que añadir.';
+      el.classList.remove('pending'); tx.textContent = out;
+      history.push({ r: 'bot', t: out });
+      speak(out);
+    } catch (e) {
+      el.classList.remove('pending');
+      var m;
+      if (e && e.name === 'AbortError') m = '(interrumpido)';
+      else if (e && e.code === 'nogpu') m = 'Este dispositivo o navegador no admite IA local (falta WebGPU). Cambie el cerebro a Gemini en Ajustes.';
+      else if (e && e.code === 'nomodel') m = 'No encuentro ningún modelo local. Conéctese a internet una vez para elegir uno en Ajustes.';
+      else if (useLocal && (!navigator.onLine || (e && e.code === 'lib'))) m = 'Necesito internet una vez para descargar mi cerebro local. Después funcionaré sin conexión.';
+      else if (useLocal) m = 'No pude cargar el modelo local (' + String((e && e.message) || 'error').slice(0, 120) + '). Pruebe con un modelo más pequeño en Ajustes.';
+      else if (e && (e.status === 400 || e.status === 403) && /key|api/i.test(e.message || '')) m = 'Gemini rechazó la clave. Revísela en Ajustes.';
+      else if (e && e.status === 404) m = 'Ese modelo de Gemini no existe. Cambie el nombre del modelo en Ajustes.';
+      else if (e && e.status === 429) m = 'Gemini dice que voy demasiado rápido o que se agotó el cupo gratuito. Inténtelo en un momento.';
+      else if (e && e.status) m = 'Gemini respondió con un error (' + e.status + ').';
+      else m = 'No pude conectar con Gemini. Revise su conexión a internet.';
+      tx.textContent = m;
+      setState('idle');
+    }
+  }
+
+  /* ---------- microphone ---------- */
+  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  function micError(code) {
+    micFailed = true;
+    if (code === 'not-allowed' || code === 'service-not-allowed') setNote('Esta página no puede usar el micrófono aquí. Usa el botón de dictado del teclado de tu dispositivo, o abre la página en el navegador.');
+    else if (code === 'no-speech') { setNote('No escuché nada. Toca el micrófono y habla otra vez.'); }
+    else if (code === 'network') setNote('El reconocimiento de voz necesita conexión a internet.');
+    else setNote('No pude activar el micrófono (' + code + '). Puedes escribir tu mensaje.');
+  }
+  function toggleMic() {
+    if (listening && rec) { rec.stop(); return; }
+    if (!SR) { setNote('Este navegador no ofrece reconocimiento de voz. Usa el dictado del teclado o escribe.'); input.focus(); return; }
+    if (synth) synth.cancel();
+    if (abortCtl) abortCtl.abort();
+    setNote(''); micFailed = false;
+    var finalText = '';
+    rec = new SR(); rec.lang = 'es-MX'; rec.interimResults = true; rec.continuous = false;
+    rec.onstart = function () { listening = true; setState('listening'); };
+    rec.onresult = function (e) {
+      var interim = '';
+      for (var i = e.resultIndex; i < e.results.length; i++) {
+        var r = e.results[i];
+        if (r.isFinal) finalText += r[0].transcript; else interim += r[0].transcript;
+      }
+      input.value = (finalText + interim).trim(); sendBtn.disabled = !input.value.trim();
+    };
+    rec.onerror = function (e) { micError(e.error); };
+    rec.onend = function () {
+      listening = false; if (state === 'listening') setState('idle');
+      var t = input.value.trim();
+      if (t && !micFailed) { input.value = ''; sendBtn.disabled = true; ask(t); }
+    };
+    try { rec.start(); } catch (err) { micError('start'); }
+  }
+  micBtn.addEventListener('click', toggleMic);
+
+  /* ---------- form & chips ---------- */
+  input.addEventListener('input', function () { sendBtn.disabled = !input.value.trim(); });
+  $('form').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var t = input.value.trim(); if (!t) return;
+    input.value = ''; sendBtn.disabled = true; awake = true; ask(t);
+  });
+
+  function greeting() {
+    var h = new Date().getHours();
+    var d = h < 6 ? 'Buenas noches' : h < 12 ? 'Buenos días' : h < 20 ? 'Buenas tardes' : 'Buenas noches';
+    return d + ', ' + cfg.addr + '. Todos los sistemas están en línea. ¿En qué puedo asistirle?';
+  }
+  function wake() {
+    awake = true;
+    var g = greeting();
+    addMsg('bot', g); history.push({ r: 'bot', t: g }); speak(g);
+  }
+  $('orb').addEventListener('click', function () {
+    if (state === 'speaking' || state === 'thinking') { if (synth) synth.cancel(); if (abortCtl) abortCtl.abort(); setState('idle'); return; }
+    if (!awake) { wake(); } else if (!listening) { toggleMic(); }
+  });
+
+  /* ---------- settings wiring ---------- */
+  $('rate').value = cfg.rate; $('pitch').value = cfg.pitch; $('auto').checked = cfg.auto; $('name').value = cfg.name; $('addr').value = cfg.addr;
+  function showVals() { $('rateV').textContent = Number(cfg.rate).toFixed(2); $('pitchV').textContent = Number(cfg.pitch).toFixed(2); $('brand').textContent = cfg.name; }
+  showVals();
+  $('key').value = cfg.apiKey; $('model').value = cfg.model; $('engine').value = cfg.engine;
+  $('engine').addEventListener('change', function (e) { cfg.engine = e.target.value; saveCfg(); if (cfg.engine === 'local') fillModels(); });
+  $('lmodel').addEventListener('change', function (e) { cfg.localModel = e.target.value; saveCfg(); });
+  $('dlbtn').addEventListener('click', function () {
+    if (!navigator.gpu) { setDl('Este dispositivo no admite IA local (falta WebGPU).'); return; }
+    setDl('Preparando…');
+    ensureEngine().catch(function (e) { setDl(navigator.onLine ? 'No se pudo cargar el modelo: ' + String((e && e.message) || 'error').slice(0, 100) : 'Necesito internet para descargarlo la primera vez.'); });
+  });
+  if (cfg.engine === 'local') fillModels();
+  $('key').addEventListener('input', function (e) { cfg.apiKey = e.target.value.trim(); saveCfg(); });
+  $('model').addEventListener('input', function (e) { cfg.model = e.target.value.trim() || 'gemini-2.5-flash'; saveCfg(); });
+  $('voice').addEventListener('change', function (e) { cfg.voiceURI = e.target.value; saveCfg(); });
+  $('rate').addEventListener('input', function (e) { cfg.rate = parseFloat(e.target.value); showVals(); saveCfg(); });
+  $('pitch').addEventListener('input', function (e) { cfg.pitch = parseFloat(e.target.value); showVals(); saveCfg(); });
+  $('auto').addEventListener('change', function (e) { cfg.auto = e.target.checked; saveCfg(); if (!cfg.auto && synth) synth.cancel(); });
+  $('name').addEventListener('input', function (e) { cfg.name = e.target.value.trim() || 'Orión'; showVals(); saveCfg(); });
+  $('addr').addEventListener('input', function (e) { cfg.addr = e.target.value.trim() || 'señor'; saveCfg(); });
+  $('test').addEventListener('click', function () { var was = cfg.auto; cfg.auto = true; speak('A su servicio, ' + cfg.addr + '. Esta es mi voz.'); cfg.auto = was; });
+
+  /* ---------- first screen ---------- */
+  (function intro() {
+    var d = document.createElement('div'); d.className = 'msg bot';
+    d.innerHTML = '<div class="who"></div><div class="txt"></div>';
+    d.querySelector('.who').textContent = cfg.name;
+    var needKey = cfg.engine === 'gemini' && !cfg.apiKey;
+    d.querySelector('.txt').textContent = needKey ? 'Antes de empezar, pega tu clave gratuita de Gemini en Ajustes de voz y trato. Después toca el orbe para despertarme.' : cfg.engine === 'local' ? 'Toca el orbe para despertarme. La primera vez que pienses algo descargaré mi cerebro local; después funciono sin internet.' : 'Toca el orbe para despertarme, o escribe. Para hablar, usa el micrófono.';
+    if (needKey) document.querySelector('details.cfg').open = true;
+    log.appendChild(d);
+    var c = document.createElement('div'); c.className = 'chips';
+    ['Cuéntame algo curioso', 'Abre YouTube', 'Ayúdame a planear mi noche', 'Dime un chiste seco'].forEach(function (q) {
+      var b = document.createElement('button'); b.type = 'button'; b.className = 'chip'; b.textContent = q;
+      b.addEventListener('click', function () { awake = true; ask(q); });
+      c.appendChild(b);
+    });
+    log.appendChild(c);
+  })();
+
+  /* ---------- orb ---------- */
+  var cv = $('cv'), ctx = cv.getContext('2d');
+  var CYAN = '#4fd8ff', GOLD = '#f2b457', DIM = '#1b6f8c';
+  var amp = 0.06, dpr = Math.min(window.devicePixelRatio || 1, 2);
+  var TARGET = { idle: 0.08, listening: 0.55, thinking: 0.3, speaking: 0.85 };
+  var SPIN = { idle: 1, listening: 1.6, thinking: 5, speaking: 2.2 };
+  function fit() {
+    var r = cv.getBoundingClientRect(); var w = Math.max(80, Math.round(r.width * dpr));
+    cv.width = w; cv.height = w; drawOrb(performance.now());
+  }
+  function drawOrb(t) {
+    var w = cv.width, c = w / 2, R = c * 0.95;
+    ctx.clearRect(0, 0, w, w);
+    var tgt = TARGET[state];
+    amp += reduce ? (tgt - amp) : (tgt - amp) * 0.07;
+    var spin = reduce ? 0 : SPIN[state];
+    var main = state === 'listening' ? GOLD : CYAN;
+    var lw = Math.max(1, w / 150);
+
+    ctx.save(); ctx.translate(c, c);
+    ctx.rotate(t * 0.00006 * spin);
+    for (var i = 0; i < 72; i++) {
+      var a = i / 72 * Math.PI * 2, long = i % 6 === 0;
+      ctx.strokeStyle = long ? main : DIM; ctx.globalAlpha = long ? 0.9 : 0.55; ctx.lineWidth = lw;
+      ctx.beginPath(); ctx.moveTo(Math.cos(a) * R * (long ? 0.88 : 0.92), Math.sin(a) * R * (long ? 0.88 : 0.92));
+      ctx.lineTo(Math.cos(a) * R, Math.sin(a) * R); ctx.stroke();
+    }
+    ctx.restore();
+
+    for (var k = 0; k < 3; k++) {
+      var r = R * (0.78 - 0.11 * k), dir = k % 2 ? -1 : 1, base = t * 0.0004 * spin * dir * (1 + k * 0.4);
+      ctx.strokeStyle = k === 1 ? GOLD : main; ctx.globalAlpha = k === 1 ? 0.6 : 0.85; ctx.lineWidth = lw * (2.2 - k * 0.5);
+      ctx.lineCap = 'round';
+      [0, Math.PI].forEach(function (off) {
+        ctx.beginPath(); ctx.arc(c, c, r, base + off, base + off + Math.PI * (0.55 - k * 0.1)); ctx.stroke();
+      });
+    }
+
+    var n = 64, inner = R * 0.36;
+    for (var j = 0; j < n; j++) {
+      var ang = j / n * Math.PI * 2;
+      var wob = reduce ? 0.6 : 0.5 + 0.5 * Math.sin(j * 1.7 + t * 0.006) * Math.sin(j * 0.7 - t * 0.0041);
+      var len = R * (0.03 + amp * 0.2 * wob);
+      ctx.strokeStyle = main; ctx.globalAlpha = 0.35 + 0.6 * wob * Math.min(1, amp * 1.4); ctx.lineWidth = lw * 1.4;
+      ctx.beginPath(); ctx.moveTo(c + Math.cos(ang) * inner, c + Math.sin(ang) * inner);
+      ctx.lineTo(c + Math.cos(ang) * (inner + len), c + Math.sin(ang) * (inner + len)); ctx.stroke();
+    }
+
+    var pulse = reduce ? 1 : 1 + 0.07 * amp * Math.sin(t * 0.012);
+    var g = ctx.createRadialGradient(c, c, 0, c, c, R * 0.3 * pulse);
+    g.addColorStop(0, '#ffffff'); g.addColorStop(0.35, main); g.addColorStop(1, 'rgba(79,216,255,0)');
+    ctx.globalAlpha = 0.95; ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(c, c, R * 0.3 * pulse, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 0.7; ctx.strokeStyle = main; ctx.lineWidth = lw;
+    ctx.beginPath(); ctx.arc(c, c, R * 0.33, 0, Math.PI * 2); ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+  function loop(t) { drawOrb(t); requestAnimationFrame(loop); }
+  document.body.setAttribute('data-state', 'idle');
+  try { if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) navigator.serviceWorker.register('sw.js'); } catch (e) { /* offline cache is optional */ }
+  try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) { /* optional */ }
+  fit();
+  window.addEventListener('resize', fit);
+  if (!reduce) requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
